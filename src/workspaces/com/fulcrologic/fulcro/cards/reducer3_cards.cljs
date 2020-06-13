@@ -76,8 +76,10 @@
    :initial-state {:child/id    :param/id
                    :child/sales :param/sales
                    :child/name  :param/name}
-   :use-hooks?    true}
-  (let [data (use-reduced-value :generated/data)]
+   :use-hooks?    true
+   :initLocalState (fn [this props]
+                     {:sub nil #_(use-reduced-value :generated/data)})}
+  (let [data (use-reduced-value :generated/data) #_(comp/get-state this :sub)]
     (div
       (p (str name ", with generated data: " data))
       (ul

@@ -10,11 +10,14 @@
     [cljs.test :as test :refer [is]]
     [com.fulcrologic.fulcro.algorithms.merge :as merge]
     [com.fulcrologic.fulcro.react.hooks :as hooks]
-    [taoensso.timbre :as log])
+    [taoensso.timbre :as log]
+    [clojure.set :as set])
   )
 
 (declare Customer Sale)
 (def names ["Sam" "Joe" "CoolDude" "James" "AnotherDude" "Name"])
+(def SPA (atom nil))
+(defn state [] (::app/state-atom @SPA))
 
 (def subscription-fns (atom []))
 (defn register-listen! [listen-fn])
@@ -44,6 +47,9 @@
 (defn customers-extractor [app-db]
   (get app-db :customer/id))
 
+(defn all-sales [sales-table]
+  (vals sales-table))
+
 (defn customer-extractor [customers-table customer-id]
   (get customers-table customer-id))
 
@@ -54,36 +60,75 @@
 
 (defn lift-to-subscription [f input-vector output]
   {:f        (fn lift-fn* [input-map]
-               (assoc input-map output (apply f (map input-map input-vector))))
+               (apply f (map input-map input-vector)))
    :requires input-vector
    :output   output})
 
 
 
 (def sum-all-sales<
-  [(lift-to-subscription sales-extractor [:app-db] :sales)
+  [(lift-to-subscription sales-extractor [:app-db] :sales-table)
+   (lift-to-subscription all-sales [:sales-table] :sales)
    (lift-to-subscription sum-sale-price [:sales] :sum)])
 
 (defn sum-customer-sales< [customer-id]
   [(lift-to-subscription customers-extractor [:app-db] :customers)
-   (lift-to-subscription #(customer-extractor % customer-id) [:customers] [:customer])
+   (lift-to-subscription #(customer-extractor % customer-id) [:customers] :customer)
    (lift-to-subscription sales-extractor [:app-db] :sales-table)
-   (lift-to-subscription customer-sales [:sales-table :customer] [:customer-sales])
-   (lift-to-subscription sum-sale-price [:customer-sales] [:sum])])
+   (lift-to-subscription customer-sales [:sales-table :customer] :customer-sales)
+   (lift-to-subscription sum-sale-price [:customer-sales] :sum)])
 
 (def customer-count<
   [(lift-to-subscription customer-extractor [:app-db] :customers)
    (lift-to-subscription customer-count [:customers] :count)])
 
 
+(defn lift-meta [o]
+  {:obj  o
+   :meta (meta o)})
+
+
 
 (defn instance-sub [sub-vector]
   (assert (vector? sub-vector))
-  (let [prior-run-result (atom {})])
-  (fn sub-runner* [app-db]
-    (loop )))
+  (let [prior-run-result (atom {})]
+    (fn sub-runner* [app-db]
+      (loop [[current-sub & rest] sub-vector
+             run-result (assoc @prior-run-result
+                          :app-db app-db)
+             unchanged-set #{}]
 
+        (log/info :remaining rest)
+        (log/warn :acc (dissoc run-result :app-db))
+        (let [args (set (:requires current-sub))
+              old-res (-> current-sub :output run-result)
+              unchanged? (set/subset? args unchanged-set)
+              new-res (if unchanged? old-res ((:f current-sub) run-result))
+              unchanged? (or unchanged? (= new-res old-res))
+              run-result (assoc run-result
+                           (:output current-sub)
+                           new-res)
+              unchanged-set (cond-> unchanged-set
+                              unchanged? (conj (:output current-sub)))]
+          (if-not (empty? rest)
+            (recur rest run-result unchanged-set)
+            (do
+              (reset! prior-run-result run-result)
+              {:res new-res :unchanged? unchanged?})))))))
 
+(declare app-db*)
+(comment
+
+  (def app-db* @(state))
+  (keys app-db*)
+
+  (def sub1 (instance-sub sum-all-sales<))
+  (sub1 app-db*)
+  (let [[a b c] sum-all-sales<
+        init {:app-db app-db*}
+        next (assoc init (:output a) ((:f a) init))
+        final (assoc next (:output b) ((:f b) next))]
+    ((:f c) final)))
 
 
 
@@ -160,6 +205,7 @@
    :initial-state (fn [_] #:top{:id        1
                                 :customers [(gen-customer)
                                             (gen-customer)]})}
+  (reset! SPA (comp/any->app this))
   (dom/div
     (dom/button
       {:onClick (fn [e]

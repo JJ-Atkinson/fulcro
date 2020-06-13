@@ -37,7 +37,10 @@
 ;; map from prop -> setters
 (defonce subscribers (atom {}))
 
-(defn register-subscriber! [prop setter!] (swap! subscribers update prop (fnil conj #{}) setter!))
+(defn register-subscriber! [prop setter!] 
+  (log/info :called-reg prop )
+  
+  (swap! subscribers update prop (fnil conj #{}) setter!))
 (defn deregister-subscriber! [prop setter!] (swap! subscribers update prop disj setter!))
 (defn push-value! [prop new-value]
   (doseq [set-value! (get @subscribers prop)]

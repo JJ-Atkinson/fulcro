@@ -48,6 +48,7 @@
 (defn render!
   "Custom renderer that uses normal kf2/render!, but also sends updates to query subscribers."
   [app options]
+  (log/info "Calling custom render subscription-cards")
   (kr2/render! app options)
   (let [state-map (app/current-state app)]
     (doseq [query (keys @subscribers)
